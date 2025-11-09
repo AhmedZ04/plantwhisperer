@@ -27,8 +27,10 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "CAMERA"
-      ]
+        "CAMERA",
+        "INTERNET"
+      ],
+      "usesCleartextTraffic": true
     },
 
     "web": {
