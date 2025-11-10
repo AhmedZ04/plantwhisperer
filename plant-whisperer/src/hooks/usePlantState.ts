@@ -139,6 +139,8 @@ export function usePlantState(): UsePlantStateReturn {
   const highZHitsRef = useRef<number>(0);
   // Wind (BioAmp EXG) disturbance factor (1 calm .. lower = disturbance)
   const windFactorRef = useRef<number>(1.0);
+  const lastWindAtRef = useRef<number>(0);
+  const quietStreakRef = useRef<number>(0);
   
   // Compute scores from raw vitals (defined first so it can be used in initialization)
   const computeScores = useCallback((raw: PlantVitalsRaw): PlantScores => {
@@ -357,11 +359,21 @@ export function usePlantState(): UsePlantStateReturn {
     // Use existing state mapping for spikes/deviations
     const bioState = computeBioSignalState(raw.bio);
     const WIND_HIT_FACTOR = 0.85; // immediate 15% drop when wind detected
-    const WIND_RECOVERY_ALPHA = 0.05; // recover ~5% of remaining gap per update
+    const WIND_RECOVERY_ALPHA_FAST = 0.2; // faster recovery (20% of remaining gap per update)
+    const QUIET_RESET_MS = 1500; // if calm for this long, snap back to 1.0
     if (bioState === 'wind_trigger') {
       windFactorRef.current = Math.min(windFactorRef.current, WIND_HIT_FACTOR);
+      lastWindAtRef.current = nowMs;
+      quietStreakRef.current = 0;
     } else {
-      windFactorRef.current = Math.min(1, windFactorRef.current + (1 - windFactorRef.current) * WIND_RECOVERY_ALPHA);
+      quietStreakRef.current += 1;
+      // If we've been calm for a short window, snap to fully calm
+      if (nowMs - (lastWindAtRef.current || 0) > QUIET_RESET_MS) {
+        windFactorRef.current = 1.0;
+      } else {
+        // Otherwise recover quickly toward calm
+        windFactorRef.current = Math.min(1, windFactorRef.current + (1 - windFactorRef.current) * WIND_RECOVERY_ALPHA_FAST);
+      }
     }
     const windFactor = windFactorRef.current;
 
