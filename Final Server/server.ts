@@ -3,6 +3,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import cors from 'cors';
 import { SerialPort } from 'serialport';
+import path from 'path';
+import fs from 'fs';
 
 interface SensorState {
   soil: number;      // raw 0-1023
@@ -10,7 +12,7 @@ interface SensorState {
   hum: number;       // % RH
   mq2: number;       // raw 0-1023
   rain: number;      // raw 0-1023
-  bio: number;       // arbitrary float (signal metric)
+  bio: number;       // raw 0-1023 (BioAmp EXG)
 }
 
 interface WireStatePayload {
@@ -19,18 +21,24 @@ interface WireStatePayload {
 }
 
 interface WebSocketMessage {
-  type: 'start' | 'stop';
+  type: 'start' | 'stop' | 'set' | 'setMode';
   intervalMs?: number;
+  state?: SensorState;
+  mode?: 'real' | 'mock';
 }
+
+// Mode: 'real' for Arduino serial, 'mock' for mock values
+type ServerMode = 'real' | 'mock';
+let currentMode: ServerMode = 'real';
 
 // Current sensor state - initialized with default values
 let currentState: SensorState = {
   soil: 550,
   temp: 23.0,
   hum: 60.0,
-  mq2: 200,
-  rain: 900,
-  bio: 8.0,
+  mq2: 70,
+  rain: 1020,
+  bio: 500,
 };
 
 let streamInterval: NodeJS.Timeout | null = null;
@@ -38,7 +46,7 @@ let streamIntervalMs = 1000;
 
 // Serial port configuration
 // Get from environment variable or use default COM3 (Windows) / /dev/ttyUSB0 (Linux/Mac)
-const SERIAL_PORT = process.env.SERIAL_PORT || (process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0');
+const SERIAL_PORT = process.env.SERIAL_PORT || (process.platform === 'win32' ? 'COM6' : '/dev/ttyUSB0');
 const SERIAL_BAUD_RATE = process.env.SERIAL_BAUD_RATE ? parseInt(process.env.SERIAL_BAUD_RATE, 10) : 9600; // Default 9600, can be overridden
 
 let serialPort: SerialPort | null = null;
@@ -53,10 +61,30 @@ const app = express();
 app.use(cors()); // Enable CORS for all routes
 app.use(express.json());
 
+// Serve static files for UI (if UI directory exists)
+const uiPath = path.join(__dirname, 'ui');
+try {
+  if (fs.existsSync(uiPath)) {
+    app.use(express.static(uiPath));
+    console.log('📁 Serving UI from:', uiPath);
+    // Serve index.html for root route
+    app.get('/', (req, res) => {
+      res.sendFile(path.join(uiPath, 'index.html'));
+    });
+  } else {
+    console.log('📁 UI directory not found at:', uiPath);
+    console.log('   UI will not be served. Access API endpoints directly.');
+  }
+} catch (error) {
+  console.log('📁 Error setting up UI serving:', error);
+  console.log('   UI will not be served. Access API endpoints directly.');
+}
+
 // Health endpoint
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
+    mode: currentMode,
     state: currentState,
     serialPort: {
       port: SERIAL_PORT,
@@ -66,21 +94,50 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Endpoint to receive sensor data from hardware
-// Accepts data in the same format as your sensors output
-// Can accept either { line: "...", json: {...} } or just { json: {...} }
-app.post('/sensors', (req, res) => {
+// Get current mode
+app.get('/api/mode', (req, res) => {
+  res.json({ mode: currentMode });
+});
+
+// Set mode (real or mock)
+app.post('/api/mode', (req, res) => {
+  const { mode } = req.body;
+  if (mode === 'real' || mode === 'mock') {
+    const previousMode = currentMode;
+    currentMode = mode;
+    
+    // If switching to real mode, try to connect serial port
+    if (mode === 'real' && !isSerialConnected) {
+      initializeSerialPort();
+    }
+    
+    // If switching to mock mode, stop serial port reading (but keep it open)
+    if (mode === 'mock' && serialPort && serialPort.isOpen) {
+      // Don't close serial port, just stop processing its data
+      console.log('🔄 Switched to mock mode - serial port data will be ignored');
+    }
+    
+    console.log(`🔄 Mode switched: ${previousMode} → ${mode}`);
+    res.json({ mode: currentMode, previousMode });
+    
+    // Don't broadcast mode change - Android app doesn't need to know about mode changes
+    // It just receives sensor data regardless of mode
+  } else {
+    res.status(400).json({ error: 'Invalid mode. Must be "real" or "mock"' });
+  }
+});
+
+// Set mock sensor values (only works in mock mode)
+app.post('/api/mock/sensors', (req, res) => {
+  if (currentMode !== 'mock') {
+    return res.status(400).json({ error: 'Cannot set mock values in real mode. Switch to mock mode first.' });
+  }
+  
   try {
     const payload = req.body;
-
-    // Extract json data - handle both formats:
-    // 1. { line: "...", json: {...} } - full payload format
-    // 2. { json: {...} } - just json data
-    // 3. Direct sensor values { soil: ..., temp: ..., ... }
     let json: SensorState;
 
     if (payload.json && typeof payload.json === 'object') {
-      // Format 1 or 2: Has json field
       json = payload.json;
     } else if (
       typeof payload.soil === 'number' &&
@@ -90,7 +147,6 @@ app.post('/sensors', (req, res) => {
       typeof payload.rain === 'number' &&
       typeof payload.bio === 'number'
     ) {
-      // Format 3: Direct sensor values
       json = {
         soil: payload.soil,
         temp: payload.temp,
@@ -112,9 +168,61 @@ app.post('/sensors', (req, res) => {
       typeof json.rain === 'number' &&
       typeof json.bio === 'number'
     ) {
-      // Update state and broadcast
+      // Update state and broadcast (only in mock mode)
       updateStateFromSensorData(json);
+      res.json({ ok: true, message: 'Mock sensor data set and broadcasted', state: currentState });
+    } else {
+      res.status(400).json({ error: 'Invalid sensor data: missing or invalid fields' });
+    }
+  } catch (error) {
+    console.error('❌ Error processing mock sensor data:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
+// Endpoint to receive sensor data from hardware (works in real mode)
+app.post('/sensors', (req, res) => {
+  if (currentMode !== 'real') {
+    return res.status(400).json({ error: 'Cannot receive sensor data in mock mode. Switch to real mode first.' });
+  }
+  
+  try {
+    const payload = req.body;
+    let json: SensorState;
+
+    if (payload.json && typeof payload.json === 'object') {
+      json = payload.json;
+    } else if (
+      typeof payload.soil === 'number' &&
+      typeof payload.temp === 'number' &&
+      typeof payload.hum === 'number' &&
+      typeof payload.mq2 === 'number' &&
+      typeof payload.rain === 'number' &&
+      typeof payload.bio === 'number'
+    ) {
+      json = {
+        soil: payload.soil,
+        temp: payload.temp,
+        hum: payload.hum,
+        mq2: payload.mq2,
+        rain: payload.rain,
+        bio: payload.bio,
+      };
+    } else {
+      return res.status(400).json({ error: 'Invalid payload: missing or invalid sensor data' });
+    }
+
+    // Validate all required sensor fields
+    if (
+      typeof json.soil === 'number' &&
+      typeof json.temp === 'number' &&
+      typeof json.hum === 'number' &&
+      typeof json.mq2 === 'number' &&
+      typeof json.rain === 'number' &&
+      typeof json.bio === 'number'
+    ) {
+      // Update state and broadcast (only in real mode)
+      updateStateFromSensorData(json);
       res.json({ ok: true, message: 'Sensor data received and broadcasted' });
     } else {
       res.status(400).json({ error: 'Invalid sensor data: missing or invalid fields' });
@@ -137,37 +245,28 @@ function formatStateLine(state: SensorState): string {
 }
 
 // Helper function to parse JSON object from Arduino
-// Example: {"line": "STATE;soil=395;temp=22.9;hum=19.0;mq2=85;rain=1020;bio=513", "json": {"soil":395,"temp":22.9,"hum":19.0,"mq2":85,"rain":1020,"bio":513}}
 function parseSensorData(data: string): SensorState | null {
   try {
-    // Remove any leading/trailing whitespace
     const trimmed = data.trim();
     
-    // Skip empty strings
     if (!trimmed) {
       return null;
     }
     
-    // Must start with { and end with } to be valid JSON
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       return null;
     }
     
-    // Try to parse as JSON
     let parsed: any;
     try {
       parsed = JSON.parse(trimmed);
     } catch (jsonError: any) {
-      // If JSON parse fails, this is incomplete or malformed JSON
-      // Throw the error so caller knows it's not just missing fields
       throw jsonError;
     }
     
-    // Check if it's the expected format with 'json' field
     if (parsed && typeof parsed === 'object' && parsed.json) {
       const json = parsed.json;
       
-      // Validate all required sensor fields
       if (
         typeof json.soil === 'number' &&
         typeof json.temp === 'number' &&
@@ -189,7 +288,6 @@ function parseSensorData(data: string): SensorState | null {
     
     return null;
   } catch (error) {
-    // Re-throw JSON parse errors so caller can distinguish from validation errors
     throw error;
   }
 }
@@ -210,7 +308,8 @@ function updateStateFromSensorData(newState: SensorState) {
   // Broadcast to all WebSocket clients immediately
   broadcast(createPayload(currentState));
 
-  console.log('📊 Sensor data received from serial:', {
+  const modeLabel = currentMode === 'real' ? 'serial' : 'mock';
+  console.log(`📊 Sensor data received from ${modeLabel}:`, {
     soil: currentState.soil,
     temp: currentState.temp.toFixed(1),
     hum: currentState.hum.toFixed(1),
@@ -230,6 +329,16 @@ function broadcast(payload: WireStatePayload) {
   });
 }
 
+// Broadcast mode change only to UI clients (not Android app)
+// Note: We don't broadcast mode changes to Android app since it only needs sensor data
+// The UI can check mode via API endpoint
+function broadcastModeChange() {
+  // Only send mode changes if client sends a special identifier
+  // For now, we'll skip broadcasting mode changes to avoid confusing the Android app
+  // The UI can poll the /api/mode endpoint to get current mode
+  console.log(`🔄 Mode changed to: ${currentMode} (UI can check via /api/mode endpoint)`);
+}
+
 // Start streaming current state at regular intervals
 function startStream(intervalMs: number) {
   if (streamInterval) {
@@ -238,6 +347,8 @@ function startStream(intervalMs: number) {
   streamIntervalMs = intervalMs;
   streamInterval = setInterval(() => {
     // Broadcast current state
+    // In real mode: state is updated by serial port
+    // In mock mode: state is updated by API calls
     broadcast(createPayload(currentState));
   }, intervalMs);
 }
@@ -255,10 +366,10 @@ wss.on('connection', (ws: WebSocket) => {
   console.log('📱 Client connected');
 
   // Send current state immediately on connection
+  // Only send sensor data, not mode changes (Android app doesn't need mode info)
   ws.send(JSON.stringify(createPayload(currentState)));
 
   // Auto-start streaming when a client connects (if not already streaming)
-  // This ensures the app gets continuous updates
   if (!streamInterval) {
     startStream(1000); // Start with 1 second interval
     console.log('🔄 Auto-started sensor streaming (1000ms interval)');
@@ -280,6 +391,32 @@ wss.on('connection', (ws: WebSocket) => {
           console.log('⏸️  Stopped streaming');
           break;
 
+        case 'set':
+          // Set mock values via WebSocket (only in mock mode)
+          if (currentMode === 'mock' && message.state) {
+            updateStateFromSensorData(message.state);
+            console.log('📊 Mock sensor values updated via WebSocket');
+          } else if (currentMode === 'real') {
+            console.warn('⚠️  Cannot set sensor values in real mode. Switch to mock mode first.');
+          }
+          break;
+
+        case 'setMode':
+          // Change mode via WebSocket
+          if (message.mode === 'real' || message.mode === 'mock') {
+            const previousMode = currentMode;
+            currentMode = message.mode;
+            
+            if (currentMode === 'real' && !isSerialConnected) {
+              initializeSerialPort();
+            }
+            
+            console.log(`🔄 Mode switched via WebSocket: ${previousMode} → ${currentMode}`);
+            // Don't broadcast mode change to avoid confusing Android app
+            // Mode changes are handled server-side only
+          }
+          break;
+
         default:
           console.warn('⚠️  Unknown message type:', message);
       }
@@ -299,17 +436,24 @@ wss.on('connection', (ws: WebSocket) => {
 
 // Initialize Serial Port Connection
 function initializeSerialPort() {
+  if (currentMode !== 'real') {
+    console.log('⚠️  Cannot initialize serial port: not in real mode');
+    return;
+  }
+
   try {
     console.log(`\n🔌 Attempting to connect to serial port: ${SERIAL_PORT} at ${SERIAL_BAUD_RATE} baud`);
+
+    // Close existing connection if any
+    if (serialPort && serialPort.isOpen) {
+      serialPort.close();
+    }
 
     serialPort = new SerialPort({
       path: SERIAL_PORT,
       baudRate: SERIAL_BAUD_RATE,
       autoOpen: false,
     });
-
-    // Use raw data stream instead of line parser to handle multi-line JSON
-    // We'll parse JSON objects by tracking braces in the data handler
 
     serialPort.open((err) => {
       if (err) {
@@ -325,10 +469,19 @@ function initializeSerialPort() {
 
       isSerialConnected = true;
       console.log(`✅ Serial port ${SERIAL_PORT} opened successfully`);
+      
+      // Reset buffer
+      jsonBuffer = '';
+      braceCount = 0;
     });
 
-    // Handle raw data from serial port (not using line parser)
+    // Handle raw data from serial port
     serialPort.on('data', (data: Buffer) => {
+      // Only process serial data if in real mode
+      if (currentMode !== 'real') {
+        return;
+      }
+
       const chunk = data.toString('utf8');
       
       // Add chunk to buffer
@@ -423,22 +576,28 @@ if (PORT !== 4000) {
 }
 
 // Bind to 0.0.0.0 (all interfaces) so Android emulator can connect via 10.0.2.2
-// localhost/127.0.0.1 only works on the same machine
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n✅ Final sensor server running on http://0.0.0.0:${PORT}`);
+  console.log(`\n✅ Unified sensor server running on http://0.0.0.0:${PORT}`);
   console.log(`   Accessible at http://localhost:${PORT}`);
   console.log(`   Android emulator: ws://10.0.2.2:${PORT}/ws`);
   console.log(`   WebSocket server available at ws://localhost:${PORT}/ws`);
   console.log(`\n📡 Endpoints:`);
-  console.log(`   POST http://localhost:${PORT}/sensors - Receive sensor data (HTTP fallback)`);
   console.log(`   GET  http://localhost:${PORT}/health - Health check`);
+  console.log(`   GET  http://localhost:${PORT}/api/mode - Get current mode`);
+  console.log(`   POST http://localhost:${PORT}/api/mode - Set mode (real/mock)`);
+  console.log(`   POST http://localhost:${PORT}/api/mock/sensors - Set mock sensor values`);
+  console.log(`   POST http://localhost:${PORT}/sensors - Receive sensor data (real mode)`);
   console.log(`   WS   ws://localhost:${PORT}/ws - WebSocket for mobile app`);
   console.log(`\n🔌 Serial Port:`);
   console.log(`   Reading from: ${SERIAL_PORT} at ${SERIAL_BAUD_RATE} baud`);
-  console.log(`   Set SERIAL_PORT environment variable to change port\n`);
+  console.log(`   Set SERIAL_PORT environment variable to change port`);
+  console.log(`\n🎮 Current Mode: ${currentMode.toUpperCase()}`);
+  console.log(`   Use POST /api/mode to switch between 'real' and 'mock' modes\n`);
 
-  // Initialize serial port connection
-  initializeSerialPort();
+  // Initialize serial port connection if in real mode
+  if (currentMode === 'real') {
+    initializeSerialPort();
+  }
 });
 
 // Handle server errors (e.g., port already in use)
@@ -478,4 +637,3 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
-
