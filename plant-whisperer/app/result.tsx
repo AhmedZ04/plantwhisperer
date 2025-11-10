@@ -159,6 +159,10 @@ export default function ResultScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Your data is ready</Text>
+            <Text style={styles.speciesTag} numberOfLines={1}>
+              {title}
+              {common ? ` (${common})` : ''}
+            </Text>
             <Text style={styles.modalSubtitle}>Here’s a quick care overview</Text>
 
             <View style={styles.section}>
@@ -234,6 +238,20 @@ const styles = StyleSheet.create({
   },
   modalTitle: { color: 'white', fontSize: 20, fontWeight: '900', textAlign: 'center' },
   modalSubtitle: { color: '#a7c8b3', fontSize: 13, textAlign: 'center', marginTop: 4 },
+  speciesTag: {
+    alignSelf: 'center',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    color: '#a8e6a3',
+    backgroundColor: '#12281d',
+    borderColor: '#1f3b2e',
+    borderWidth: 1,
+    fontWeight: '800',
+    overflow: 'hidden',
+    maxWidth: '90%',
+  },
   section: { marginTop: 14 },
   sectionTitle: { color: '#cde8d6', fontWeight: '700', marginBottom: 8 },
   metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6, marginTop: -6 },
