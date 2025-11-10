@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, useWindowDimensions, Text, TouchableOpacity, Animated, ImageSourcePropType, Modal, Pressable } from 'react-native';
 import { Image } from 'expo-image';
-import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 // Lazy require to avoid type resolution issues during linting if package isn't installed yet
@@ -149,6 +148,11 @@ export default function DashboardScreen() {
   // Background crossfade state (sunny <-> snowy)
   const [isSnowy, setIsSnowy] = useState(false);
   const bgFade = useRef(new Animated.Value(0)).current; // 0 = sunny, 1 = snowy
+  // Speech bubble state
+  const [speechVisible, setSpeechVisible] = useState(false);
+  const [speechMessage, setSpeechMessage] = useState('');
+  const speechTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSpeechAnimationRef = useRef<ImageSourcePropType | null>(null);
 
   useEffect(() => {
     if (animationSource === currentAnimation) {
@@ -175,6 +179,84 @@ export default function DashboardScreen() {
     incomingOpacity.setValue(0);
     isTransitioningRef.current = false;
   }, [animationSource, currentAnimation, currentOpacity, incomingOpacity]);
+
+  useEffect(() => {
+    if (speechTimeoutRef.current) {
+      clearTimeout(speechTimeoutRef.current);
+      speechTimeoutRef.current = null;
+    }
+
+    if (!currentAnimation) {
+      setSpeechVisible(false);
+      lastSpeechAnimationRef.current = null;
+      return;
+    }
+
+    const message = (() => {
+      if (currentAnimation === PEAK_ANIMATION) {
+        return 'I feel so good :)';
+      }
+      if (currentAnimation === HOT_ANIMATION) {
+        return "Whew, it's way too toasty!";
+      }
+      if (currentAnimation === COLD_ANIMATION) {
+        return "Brrr... I'm freezing out!";
+      }
+      if (currentAnimation === DRY_ANIMATION) {
+        if (humidity < 35) {
+          return 'The air feels crackly dry.';
+        }
+        if (soilMoisture >= 900) {
+          return 'My soil is parched... water?';
+        }
+        return "I'm drying out pretty fast.";
+      }
+      if (currentAnimation === THIRSTY_ANIMATION) {
+        return 'A small drink would help so much.';
+      }
+      if (currentAnimation === AIR_BAD_ANIMATION) {
+        return 'The air smells kinda funky.';
+      }
+      if (currentAnimation === DIZZY_ANIMATION) {
+        return 'These fumes... I feel dizzy!';
+      }
+      if (currentAnimation === FULL_DEAD_ANIMATION) {
+        return 'Everything hurts... send help.';
+      }
+      if (currentAnimation === WINDY_ANIMATION) {
+        return "Whoa, the wind is tossing me!";
+      }
+      if (currentAnimation === WATERING_ANIMATION) {
+        return 'Ahhh, that cool drink hits!';
+      }
+      return null;
+    })();
+
+    if (!message) {
+      setSpeechVisible(false);
+      lastSpeechAnimationRef.current = currentAnimation;
+      return;
+    }
+
+    if (lastSpeechAnimationRef.current === currentAnimation) {
+      return;
+    }
+
+    lastSpeechAnimationRef.current = currentAnimation;
+    setSpeechMessage(message);
+    setSpeechVisible(true);
+    speechTimeoutRef.current = setTimeout(() => {
+      setSpeechVisible(false);
+      speechTimeoutRef.current = null;
+    }, 2500);
+
+    return () => {
+      if (speechTimeoutRef.current) {
+        clearTimeout(speechTimeoutRef.current);
+        speechTimeoutRef.current = null;
+      }
+    };
+  }, [currentAnimation, humidity, soilMoisture]);
 
   useEffect(() => {
     if (!incomingAnimation || !incomingReady || isTransitioningRef.current) {
@@ -213,14 +295,6 @@ export default function DashboardScreen() {
       }, 60);
     });
   }, [animationSource, incomingAnimation, incomingReady, windowWidth, windowHeight, currentOpacity, incomingOpacity, revealScale]);
-
-  // Position of the black line (as percentage of screen height)
-  // Adjust this value based on your background image
-  const BLACK_LINE_POSITION = 0.65; // 65% down the screen
-  const BLACK_LINE_HEIGHT = 4;
-  const blackLineTop = windowHeight * BLACK_LINE_POSITION;
-  const blurredSectionTop = blackLineTop + BLACK_LINE_HEIGHT;
-  const blurredSectionHeight = windowHeight - blurredSectionTop;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={[]}>
@@ -270,6 +344,18 @@ export default function DashboardScreen() {
             contentFit="cover"
           />
         </Animated.View>
+        {speechVisible && speechMessage ? (
+          <View style={styles.speechBubbleWrapper}>
+            <Image
+              source={require('../../assets/images/speech.png')}
+              style={styles.speechBubbleImage}
+              contentFit="contain"
+            />
+            <Text numberOfLines={2} style={styles.speechBubbleText}>
+              {speechMessage}
+            </Text>
+          </View>
+        ) : null}
         {/* Plant animation overlay (condition-based GIF) */}
         {currentAnimation && (
           <Animated.View
@@ -344,38 +430,12 @@ export default function DashboardScreen() {
           </Pressable>
         </Modal>
 
-        {/* Black Line Separator */}
-        <View
-          style={[
-            styles.blackLine,
-            {
-              top: blackLineTop,
-            },
-          ]}
-        />
-
-        {/* Blurred Section Below Black Line - Using multiple layers for better blur effect */}
-        <View
-          style={[
-            styles.blurredSection,
-            {
-              top: blurredSectionTop,
-              height: blurredSectionHeight,
-            },
-          ]}>
-          {/* Background blur layer - High intensity, no tint for true Gaussian blur */}
-          <BlurView
-            intensity={120}
-            tint="default"
-            style={styles.blurLayer}
-          />
-          {/* Health Bars on top of blurred area */}
-          {scores && (
-            <View style={styles.healthBarsContainer}>
-              <HealthBars scores={scores} rawVitals={rawVitals} />
-            </View>
-          )}
-        </View>
+        {/* Health bars & sensor icons */}
+        {scores && (
+          <View style={styles.healthBarsContainer}>
+            <HealthBars scores={scores} rawVitals={rawVitals} />
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -409,37 +469,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
-  blackLine: {
-    position: 'absolute',
-    width: '100%',
-    height: 4,
-    backgroundColor: '#000000',
-    zIndex: 5, // Above all image layers, below health bars
-  },
-  blurredSection: {
-    position: 'absolute',
-    width: '100%',
-    left: 0,
-    right: 0,
-    zIndex: 6, // Above all image layers and black line, contains health bars
-    overflow: 'hidden',
-  },
-  blurLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '100%',
-  },
   healthBarsContainer: {
-    position: 'relative',
-    zIndex: 10,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-    justifyContent: 'flex-start',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: spacing.xl,
+    zIndex: 6,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    justifyContent: 'center',
   },
   revealCircle: {
     position: 'absolute',
@@ -553,5 +591,28 @@ const styles = StyleSheet.create({
   dayToggleText: {
     color: '#fff',
     fontSize: 18,
+  },
+  speechBubbleWrapper: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  speechBubbleImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  speechBubbleText: {
+    position: 'absolute',
+    top: '35%',
+    transform: [{ translateX: -70 }, { translateY: -50 }],
+    width: '48%',
+    textAlign: 'center',
+    color: '#2f1b0c',
+    fontSize: 16,
+    fontFamily: 'SuperJoyful',
+    lineHeight: 20,
   },
 });
