@@ -9,5 +9,4 @@ export { ReminderBanner } from './ReminderBanner';
 export { EventLog } from './EventLog';
 export { PixelCameraIcon } from './PixelCameraIcon';
 export { PixelIcon } from './PixelIcon';
-export { SensorDetailDialog } from './SensorDetailDialog';
 

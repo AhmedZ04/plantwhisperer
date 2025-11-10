@@ -1,328 +1,319 @@
 /**
- * HealthBars component - Revised system
- * - Single overall red health bar at top (weighted average of soil, temp, hum, mq2)
- * - Diamond icons below for each sensor (green if optimal, red if not)
- * - Long press on icons shows detail dialog with vertical meter
+ * HealthBars component - Pixel art game style
+ * Matches the exact theme from the reference image:
+ * - Diamond-shaped icon module on the left
+ * - Arrow-tapered progress bar on the right
+ * - Double borders (dark outer, gold inner)
+ * - Gradient fills
  */
 
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
-import { PlantScores, PlantVitalsRaw, ComfortMetrics, CareTargets } from '../types/plant';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { PlantScores } from '../types/plant';
 import { colors, spacing, typography } from '../theme';
 import { PixelIcon } from './PixelIcon';
-import {
-  computeOverallHealth,
-  isSoilOptimal,
-  isTempOptimal,
-  isHumOptimal,
-  isMq2Optimal,
-  computeHydrationScore,
-  computeTempScore,
-  computeHumScore,
-  computeAirQualityScore,
-} from '../services/plantModel';
-import { SensorDetailDialog } from './SensorDetailDialog';
-import { HealthBar } from './HealthBar';
 
 interface HealthBarsProps {
   scores: PlantScores | null;
-  rawVitals: PlantVitalsRaw | null;
-  metrics?: ComfortMetrics | null;
-  careTargets?: CareTargets | null;
-  setRealtimeMode?: (enabled: boolean) => void;
 }
 
-export function HealthBars({ scores, rawVitals, metrics, careTargets, setRealtimeMode }: HealthBarsProps) {
-  const { width: windowWidth } = useWindowDimensions();
-  const [selectedSensor, setSelectedSensor] = useState<'soil' | 'temp' | 'hum' | 'mq2' | null>(null);
+export function HealthBars({ scores }: HealthBarsProps) {
+  const barHeight = 40; // Reduced height for pixel art bars
+  const iconSize = barHeight; // Icon module is square
 
-  if (!scores || !rawVitals) {
-    return null; // Don't render if scores or raw vitals not available
+  if (!scores) {
+    return null; // Don't render if scores not available
   }
 
-  // Calculate main bar: prefer PCS from comfort metrics if available
-  const overallHealth = typeof metrics?.pcs === 'number'
-    ? Math.round(metrics.pcs * 100)
-    : computeOverallHealth(
-        rawVitals.soilMoisture,
-        rawVitals.temperature,
-        rawVitals.humidity,
-        rawVitals.mq2
-      );
-
-  // Check optimality for each sensor (prefer API-derived ranges when available)
-  const within = (v: number, min: number, max: number) => v >= min && v <= max;
-  const soilOptimal = careTargets && typeof metrics?.soilPercent === 'number'
-    ? within(metrics!.soilPercent, careTargets.min_soil_moist, careTargets.max_soil_moist)
-    : isSoilOptimal(rawVitals.soilMoisture);
-  const tempOptimal = careTargets
-    ? within(rawVitals.temperature, careTargets.min_temp, careTargets.max_temp)
-    : isTempOptimal(rawVitals.temperature);
-  const humOptimal = careTargets
-    ? within(rawVitals.humidity, careTargets.min_env_humid, careTargets.max_env_humid)
-    : isHumOptimal(rawVitals.humidity);
-  // Gas remains hardcoded (MQ2 < 150)
-  const mq2Optimal = isMq2Optimal(rawVitals.mq2);
-
-  // Calculate individual sensor scores for the detail dialog
-  const soilScore = computeHydrationScore(rawVitals.soilMoisture, rawVitals.raindrop);
-  const tempScore = computeTempScore(rawVitals.temperature);
-  const humScore = computeHumScore(rawVitals.humidity);
-  const mq2Score = computeAirQualityScore(rawVitals.mq2);
-
-  const handleLongPress = (sensorType: 'soil' | 'temp' | 'hum' | 'mq2') => {
-    setRealtimeMode?.(true);
-    setSelectedSensor(sensorType);
-  };
-
-  const handleCloseDialog = () => {
-    setRealtimeMode?.(false);
-    setSelectedSensor(null);
-  };
-
-  const getSensorValue = (sensorType: 'soil' | 'temp' | 'hum' | 'mq2'): number => {
-    switch (sensorType) {
-      case 'soil':
-        return rawVitals.soilMoisture;
-      case 'temp':
-        return rawVitals.temperature;
-      case 'hum':
-        return rawVitals.humidity;
-      case 'mq2':
-        return rawVitals.mq2;
+  const getBarConfig = (type: 'hydration' | 'comfort' | 'airQuality' | 'bioLink'): {
+    fillColor: string;
+    fillLight: string;
+    fillDark: string;
+    iconType: 'health' | 'water' | 'sunlight' | 'soil' | 'bioLink';
+    label: string;
+  } => {
+    switch (type) {
+      case 'hydration':
+        return {
+          fillColor: colors.healthBarBlue,
+          fillLight: colors.healthBarBlueLight,
+          fillDark: colors.healthBarBlueDark,
+          iconType: 'water',
+          label: 'Hydration',
+        };
+      case 'comfort':
+        return {
+          fillColor: colors.healthBarGreen,
+          fillLight: colors.healthBarGreenLight,
+          fillDark: colors.healthBarGreenDark,
+          iconType: 'sunlight',
+          label: 'Comfort',
+        };
+      case 'airQuality':
+        return {
+          fillColor: colors.healthBarRed,
+          fillLight: colors.healthBarRedLight,
+          fillDark: colors.healthBarRedDark,
+          iconType: 'health',
+          label: 'Air Quality',
+        };
+      case 'bioLink':
+        return {
+          fillColor: colors.healthBarBrown,
+          fillLight: colors.healthBarBrownLight,
+          fillDark: colors.healthBarBrownDark,
+          iconType: 'bioLink',
+          label: 'Bio Link',
+        };
     }
   };
 
-  const getSensorScore = (sensorType: 'soil' | 'temp' | 'hum' | 'mq2'): number => {
-    switch (sensorType) {
-      case 'soil':
-        return soilScore;
-      case 'temp':
-        return tempScore;
-      case 'hum':
-        return humScore;
-      case 'mq2':
-        return mq2Score;
-    }
-  };
-
-  const getSensorOptimal = (sensorType: 'soil' | 'temp' | 'hum' | 'mq2'): boolean => {
-    switch (sensorType) {
-      case 'soil':
-        return soilOptimal;
-      case 'temp':
-        return tempOptimal;
-      case 'hum':
-        return humOptimal;
-      case 'mq2':
-        return mq2Optimal;
-    }
-  };
-
-  // Get color based on health percentage
-  const getHealthColor = (percentage: number): { fill: string; fillLight: string } => {
-    if (percentage >= 70) {
-      // Green (good)
-      return { fill: '#4caf50', fillLight: '#66bb6a' };
-    } else if (percentage >= 40) {
-      // Yellow (okay)
-      return { fill: '#ffb74d', fillLight: '#ffcc80' };
-    } else {
-      // Red (poor)
-      return { fill: '#f44336', fillLight: '#e53935' };
-    }
-  };
-
-  // Render overall health bar
-  const renderOverallHealthBar = () => {
-    const displayValue = Math.max(0, Math.min(100, overallHealth));
-
-    return (
-      <View style={styles.overallHealthContainer}>
-        <Text style={styles.overallHealthLabel}>Plant Comfort Score</Text>
-        <View style={styles.overallHealthBarWrapper}>
-          {/* Health bar component - handles its own percentage display */}
-          <HealthBar
-            healthPercentage={displayValue}
-          />
-        </View>
-      </View>
-    );
-  };
-
-  // Render sensor diamond icon
-  const renderSensorIcon = (
-    sensorType: 'soil' | 'temp' | 'hum' | 'mq2',
-    iconType: 'soil' | 'sunlight' | 'water' | 'health',
-    label: string,
-    isOptimal: boolean
+  const renderHealthBar = (
+    type: 'hydration' | 'comfort' | 'airQuality' | 'bioLink',
+    value: number,
+    key: string
   ) => {
-    const iconSize = 48;
-    const iconColor = isOptimal ? '#4caf50' : '#f44336'; // Green if optimal, red if not
+    const config = getBarConfig(type);
+    // Clamp value to 0-100 for display
+    const displayValue = Math.max(0, Math.min(100, value));
 
     return (
-      <TouchableOpacity
-        style={styles.sensorIconContainer}
-        onLongPress={() => handleLongPress(sensorType)}
-        activeOpacity={0.7}
-      >
-        {/* Diamond-shaped icon module */}
-        <View style={[styles.sensorIconModule, { width: iconSize, height: iconSize }]}>
+      <View key={key} style={styles.barContainer}>
+        {/* Label */}
+        <Text style={styles.barLabel}>{config.label}</Text>
+        
+        {/* Bar Row */}
+        <View style={styles.barWrapper}>
+          {/* Icon Module - Diamond shape with extended points */}
+          <View style={[styles.iconModule, { width: iconSize, height: iconSize }]}>
+            {/* Outer dark border */}
+            <View style={[styles.iconOuterBorder, { width: iconSize, height: iconSize }]} />
+            {/* Inner gold frame */}
+            <View style={[styles.iconInnerFrame, { width: iconSize - 8, height: iconSize - 8 }]} />
+            {/* Background */}
+            <View style={[styles.iconBackground, { width: iconSize - 12, height: iconSize - 12 }]} />
+            {/* Icon */}
+            <View style={styles.iconContainer}>
+              <PixelIcon type={config.iconType} size={iconSize - 16} />
+            </View>
+          </View>
+
+          {/* Progress Bar - Arrow/Banner shape */}
+          <View style={[styles.progressBarWrapper, { height: barHeight }]}>
           {/* Outer dark border */}
-          <View
-            style={[
-              styles.sensorIconOuterBorder,
-              {
-                width: iconSize,
-                height: iconSize,
-                borderColor: iconColor,
-              },
-            ]}
-          />
-          {/* Inner frame */}
-          <View
-            style={[
-              styles.sensorIconInnerFrame,
-              {
-                width: iconSize - 8,
-                height: iconSize - 8,
-                borderColor: iconColor,
-              },
-            ]}
-          />
-          {/* Background */}
-          <View
-            style={[
-              styles.sensorIconBackground,
-              {
-                width: iconSize - 12,
-                height: iconSize - 12,
-                backgroundColor: isOptimal ? 'rgba(76, 175, 80, 0.2)' : 'rgba(244, 67, 54, 0.2)',
-              },
-            ]}
-          />
-          {/* Icon */}
-          <View style={styles.sensorIconContainerInner}>
-            <PixelIcon type={iconType} size={iconSize - 16} />
+          <View style={[styles.barOuterBorder, { height: barHeight }]} />
+          
+          {/* Inner gold frame */}
+          <View style={[styles.barInnerFrame, { height: barHeight - 6 }]} />
+          
+          {/* Bar content area */}
+          <View style={[styles.barContent, { height: barHeight - 10 }]}>
+            {/* Fill with gradient effect */}
+            <View 
+              style={[
+                styles.barFillContainer, 
+                { 
+                  width: `${displayValue}%`,
+                  height: '100%',
+                }
+              ]}>
+              {/* Main fill */}
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: config.fillColor,
+                    height: '100%',
+                    width: '100%',
+                  },
+                ]}
+              />
+              {/* Top gradient highlight (lighter) */}
+              <View
+                style={[
+                  styles.barFillTop,
+                  {
+                    backgroundColor: config.fillLight,
+                    height: '30%',
+                    width: '100%',
+                  },
+                ]}
+              />
+            </View>
+            
+            {/* Empty area (darker) */}
+            <View
+              style={[
+                styles.barEmpty,
+                {
+                  backgroundColor: config.fillDark,
+                  width: `${100 - displayValue}%`,
+                  height: '100%',
+                },
+              ]}
+            />
+          </View>
+
+          {/* Arrow point on the right - created using two triangles */}
+          <View style={[styles.arrowPointContainer, { height: barHeight }]}>
+            <View style={styles.arrowPointTop} />
+            <View style={styles.arrowPointBottom} />
           </View>
         </View>
-        {/* Label */}
-        <Text style={styles.sensorIconLabel}>{label}</Text>
-      </TouchableOpacity>
+        </View>
+      </View>
     );
   };
 
   return (
-    <View style={styles.container}>
-      {/* Overall Health Bar */}
-      {renderOverallHealthBar()}
-
-      {/* Sensor Icons Row */}
-      <View style={styles.sensorIconsRow}>
-        {renderSensorIcon('soil', 'soil', 'Soil', soilOptimal)}
-        {renderSensorIcon('temp', 'sunlight', 'Temp', tempOptimal)}
-        {renderSensorIcon('hum', 'water', 'Hum', humOptimal)}
-        {renderSensorIcon('mq2', 'health', 'Air', mq2Optimal)}
-      </View>
-
-      {/* Sensor Detail Dialog */}
-      {selectedSensor && (
-        <SensorDetailDialog
-          visible={true}
-          onClose={handleCloseDialog}
-          sensorType={selectedSensor}
-          sensorValue={getSensorValue(selectedSensor)}
-          sensorScore={getSensorScore(selectedSensor)}
-          isOptimal={getSensorOptimal(selectedSensor)}
-        />
-      )}
-    </View>
+    <>
+      {renderHealthBar('hydration', scores.hydrationScore, 'hydration')}
+      {renderHealthBar('comfort', scores.comfortScore, 'comfort')}
+      {renderHealthBar('airQuality', scores.airQualityScore, 'airQuality')}
+      {renderHealthBar('bioLink', scores.bioSignalScore, 'bioLink')}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    width: '100%',
+  barContainer: {
+    marginBottom: spacing.sm,
   },
-  overallHealthContainer: {
-    marginBottom: spacing.md,
-  },
-  overallHealthLabel: {
+  barLabel: {
     ...typography.label,
     color: colors.textPrimary,
     marginBottom: spacing.xs / 2,
-    fontFamily: 'monospace',
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'monospace', // Pixel art font
+    fontSize: 12,
   },
-  overallHealthBarWrapper: {
-    position: 'relative',
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overallHealthPercentage: {
-    position: 'absolute',
-    right: 20,
-    top: '50%',
-    transform: [{ translateY: -10 }],
-    zIndex: 10, // Above all overlays
-  },
-  overallHealthPercentageText: {
-    ...typography.label,
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
-    fontFamily: 'monospace',
-  },
-  sensorIconsRow: {
+  barWrapper: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  sensorIconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sensorIconModule: {
+  // Icon Module Styles
+  iconModule: {
     position: 'relative',
-    transform: [{ rotate: '45deg' }],
+    transform: [{ rotate: '45deg' }], // Rotate to diamond shape
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xs,
   },
-  sensorIconOuterBorder: {
+  iconOuterBorder: {
     position: 'absolute',
-    borderWidth: 3,
+    backgroundColor: colors.healthBarOuterBorder,
     borderRadius: 0,
+    borderWidth: 0,
   },
-  sensorIconInnerFrame: {
+  iconInnerFrame: {
     position: 'absolute',
-    borderWidth: 2,
+    backgroundColor: colors.healthBarInnerFrame,
     borderRadius: 0,
     alignSelf: 'center',
     top: 4,
     left: 4,
   },
-  sensorIconBackground: {
+  iconBackground: {
     position: 'absolute',
+    backgroundColor: colors.healthBarIconBg,
     borderRadius: 0,
     alignSelf: 'center',
     top: 6,
     left: 6,
   },
-  sensorIconContainerInner: {
+  iconContainer: {
     position: 'absolute',
-    transform: [{ rotate: '-45deg' }],
+    transform: [{ rotate: '-45deg' }], // Counter-rotate icon
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sensorIconLabel: {
-    ...typography.label,
-    fontSize: 11,
-    color: colors.textPrimary,
-    fontFamily: 'monospace',
-    marginTop: 2,
+  // Progress Bar Styles
+  progressBarWrapper: {
+    flex: 1,
+    position: 'relative',
+    flexDirection: 'row',
+  },
+  barOuterBorder: {
+    position: 'absolute',
+    width: '100%',
+    backgroundColor: colors.healthBarOuterBorder,
+    borderRadius: 0,
+    borderWidth: 0,
+    height: '100%',
+  },
+  barInnerFrame: {
+    position: 'absolute',
+    left: 3,
+    right: 17, // Leave space for arrow point (14 + 3)
+    backgroundColor: colors.healthBarInnerFrame,
+    borderRadius: 0,
+    top: 3,
+    borderWidth: 0,
+  },
+  barContent: {
+    position: 'absolute',
+    left: 5,
+    right: 19, // Leave space for arrow point (14 + 5)
+    flexDirection: 'row',
+    top: 5,
+    borderRadius: 0,
+    overflow: 'hidden',
+  },
+  barFillContainer: {
+    height: '100%',
+    position: 'relative',
+    borderRadius: 0,
+  },
+  barFill: {
+    borderRadius: 0,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  barFillTop: {
+    borderRadius: 0,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  barEmpty: {
+    borderRadius: 0,
+  },
+  arrowPointContainer: {
+    position: 'absolute',
+    right: 0,
+    width: 14,
+    overflow: 'hidden',
+  },
+  arrowPointTop: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 14,
+    borderLeftColor: colors.healthBarOuterBorder,
+    borderTopWidth: 20,
+    borderTopColor: 'transparent',
+    borderBottomWidth: 0,
+    borderBottomColor: 'transparent',
+    borderRightWidth: 0,
+    borderRightColor: 'transparent',
+  },
+  arrowPointBottom: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 14,
+    borderLeftColor: colors.healthBarOuterBorder,
+    borderBottomWidth: 20,
+    borderBottomColor: 'transparent',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
+    borderRightWidth: 0,
+    borderRightColor: 'transparent',
   },
 });

@@ -45,9 +45,8 @@ let streamInterval: NodeJS.Timeout | null = null;
 let streamIntervalMs = 1000;
 
 // Serial port configuration
-// Get from environment variable or use default COM3 (Windows) / /dev/ttyUSB0 (Linux/Mac)
-const SERIAL_PORT = process.env.SERIAL_PORT || (process.platform === 'win32' ? 'COM6' : '/dev/ttyUSB0');
-const SERIAL_BAUD_RATE = process.env.SERIAL_BAUD_RATE ? parseInt(process.env.SERIAL_BAUD_RATE, 10) : 9600; // Default 9600, can be overridden
+const SERIAL_PORT = process.env.SERIAL_PORT || (process.platform === 'win32' ? 'COM11' : '/dev/ttyUSB0');
+const SERIAL_BAUD_RATE = process.env.SERIAL_BAUD_RATE ? parseInt(process.env.SERIAL_BAUD_RATE, 10) : 9600;
 
 let serialPort: SerialPort | null = null;
 let isSerialConnected = false;

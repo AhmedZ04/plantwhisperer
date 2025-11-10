@@ -1,20 +1,18 @@
 import React from 'react';
-import { View, StyleSheet, useWindowDimensions, Text } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlantState } from '@/src/hooks/usePlantState';
 import { HealthBars } from '@/src/components/HealthBars';
-import { spacing, colors, typography } from '@/src/theme';
+import { spacing } from '@/src/theme';
 
 /**
  * DashboardScreen - Shows background image with blurred section below black line
  * Health bars are displayed on top of the blurred area
  */
 export default function DashboardScreen() {
-
-  const { scores, emotion, rawVitals, metrics, careTargets, setRealtimeMode } = usePlantState();
-
+  const { scores, emotion } = usePlantState();
   const { height: windowHeight } = useWindowDimensions();
 
   // Check if emotion is I_AM_OKAY
@@ -31,7 +29,6 @@ export default function DashboardScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={[]}>
       <View style={styles.container}>
-
         {/* Background Image - Conditional based on emotion state */}
         {isOkayState ? (
           <>
@@ -97,13 +94,11 @@ export default function DashboardScreen() {
           {/* Health Bars on top of blurred area */}
           {scores && (
             <View style={styles.healthBarsContainer}>
-              <HealthBars scores={scores} rawVitals={rawVitals} metrics={metrics} careTargets={careTargets} setRealtimeMode={setRealtimeMode} />
+              <HealthBars scores={scores} />
             </View>
           )}
         </View>
       </View>
-
-      {/* Camera access has moved to the initial flow; no floating button here */}
     </SafeAreaView>
   );
 }
@@ -167,20 +162,5 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     justifyContent: 'flex-start',
-  },
-  cameraFab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
-    backgroundColor: colors.primaryDark,
-    borderColor: colors.pixelOutline,
-    borderWidth: 2,
-    borderRadius: 28,
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-    elevation: 6,
   },
 });
