@@ -125,7 +125,6 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
 
     return (
       <View style={styles.overallHealthContainer}>
-        <Text style={styles.overallHealthLabel}>Overall Health</Text>
         <View style={styles.overallHealthBarWrapper}>
           {/* Health bar component - handles its own percentage display */}
           <HealthBar
