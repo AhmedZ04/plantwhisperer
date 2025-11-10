@@ -1,110 +1,104 @@
-import React, { useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import React from 'react';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
+import { Image } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-
-import { colors, spacing, typography } from '@/src/theme';
 import { usePlantState } from '@/src/hooks/usePlantState';
-import { ConnectionStatusPill } from '@/src/components/ConnectionStatusPill';
-import { PlantAvatar } from '@/src/components/PlantAvatar';
 import { HealthBars } from '@/src/components/HealthBars';
-import { ReminderBanner } from '@/src/components/ReminderBanner';
-import { EventLog } from '@/src/components/EventLog';
-import { PixelCameraIcon } from '@/src/components/PixelCameraIcon';
+import { spacing } from '@/src/theme';
 
 /**
- * DashboardScreen - Main dashboard for the plant care game
- * Composition layer that wires up existing components & hooks
- * Uses pixel/retro theme system for all styling
+ * DashboardScreen - Shows background image with blurred section below black line
+ * Health bars are displayed on top of the blurred area
  */
 export default function DashboardScreen() {
-  const router = useRouter();
-  const {
-    vitals,
-    scores,
-    mood,
-    emotion,
-    eventLog,
-    pendingReminder,
-    connectionStatus,
-    name,
-    level,
-    status,
-  } = usePlantState();
+  const { scores, emotion } = usePlantState();
+  const { height: windowHeight } = useWindowDimensions();
 
-  const handleCameraPress = () => {
-    router.push('/camera');
-  };
+  // Check if emotion is I_AM_OKAY
+  const isOkayState = emotion === 'I_AM_OKAY';
 
-  // Debug: Log connection status for troubleshooting
-  useEffect(() => {
-    if (connectionStatus === 'error') {
-      console.warn('WebSocket connection error. Make sure:');
-      console.warn('1. Mock server is running on port 4000');
-      console.warn('2. Device and computer are on the same network');
-      console.warn('3. Firewall allows connections on port 4000');
-    }
-  }, [connectionStatus]);
+  // Position of the black line (as percentage of screen height)
+  // Adjust this value based on your background image
+  const BLACK_LINE_POSITION = 0.65; // 65% down the screen
+  const BLACK_LINE_HEIGHT = 4;
+  const blackLineTop = windowHeight * BLACK_LINE_POSITION;
+  const blurredSectionTop = blackLineTop + BLACK_LINE_HEIGHT;
+  const blurredSectionHeight = windowHeight - blurredSectionTop;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        {/* Header with Title and Camera Icon */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.title}>Plant Whisperer</Text>
-            {name && (
-              <Text style={styles.subtitle}>{name}</Text>
-            )}
-          </View>
-          <TouchableOpacity
-            style={styles.cameraButton}
-            onPress={handleCameraPress}
-            activeOpacity={0.8}>
-            <PixelCameraIcon size={spacing.xl} color={colors.textInverse} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Connection Status */}
-        <View style={styles.statusContainer}>
-          <ConnectionStatusPill status={connectionStatus} />
-        </View>
-
-        {/* Plant Avatar - Centered */}
-        <View style={styles.avatarContainer}>
-          <PlantAvatar mood={mood} emotion={emotion} size={140} />
-          {level && (
-            <Text style={styles.levelText}>Level {level}</Text>
-          )}
-        </View>
-
-        {/* Health Bars */}
-        <View style={styles.healthBarsContainer}>
-          <HealthBars scores={scores} />
-        </View>
-
-        {/* Reminder Banner */}
-        {pendingReminder && (
-          <View style={styles.reminderContainer}>
-            <ReminderBanner reminders={[pendingReminder]} />
-          </View>
+    <SafeAreaView style={styles.safeArea} edges={[]}>
+      <View style={styles.container}>
+        {/* Background Image - Conditional based on emotion state */}
+        {isOkayState ? (
+          <>
+            {/* Layer 1: Bottom background - only bg only.png */}
+            <Image
+              source={require('../../assets/images/only_bg_only.png')}
+              style={[styles.layerImage, { zIndex: 1 }]}
+              contentFit="cover"
+            />
+            {/* Layer 2: Window.png */}
+            <Image
+              source={require('../../assets/images/Window.png')}
+              style={[styles.layerImage, { zIndex: 2 }]}
+              contentFit="cover"
+            />
+            {/* Layer 3: Shelf.png */}
+            <Image
+              source={require('../../assets/images/shelf.png')}
+              style={[styles.layerImage, { zIndex: 3 }]}
+              contentFit="cover"
+            />
+            {/* Layer 4: Pot animated GIF - pot_ok.gif */}
+            <Image
+              source={require('../../assets/images/pot_ok.gif')}
+              style={[styles.layerImage, { zIndex: 4 }]}
+              contentFit="cover"
+            />
+          </>
+        ) : (
+          /* When NOT I_AM_OKAY: Show Background.png */
+          <Image
+            source={require('../../assets/images/Background.png')}
+            style={styles.backgroundImage}
+            contentFit="cover"
+          />
         )}
 
-        {/* Event Log */}
-        <View style={styles.eventLogContainer}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <EventLog events={eventLog} />
+        {/* Black Line Separator */}
+        <View
+          style={[
+            styles.blackLine,
+            {
+              top: blackLineTop,
+            },
+          ]}
+        />
+
+        {/* Blurred Section Below Black Line - Using multiple layers for better blur effect */}
+        <View
+          style={[
+            styles.blurredSection,
+            {
+              top: blurredSectionTop,
+              height: blurredSectionHeight,
+            },
+          ]}>
+          {/* Background blur layer - High intensity, no tint for true Gaussian blur */}
+          <BlurView
+            intensity={120}
+            tint="default"
+            style={styles.blurLayer}
+          />
+          {/* Health Bars on top of blurred area */}
+          {scores && (
+            <View style={styles.healthBarsContainer}>
+              <HealthBars scores={scores} />
+            </View>
+          )}
         </View>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -112,79 +106,61 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#000',
   },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    position: 'relative',
   },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.lg,
+  layerImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
-  headerLeft: {
-    flex: 1,
+  blackLine: {
+    position: 'absolute',
+    width: '100%',
+    height: 4,
+    backgroundColor: '#000000',
+    zIndex: 5, // Above all image layers, below health bars
   },
-  title: {
-    ...typography.title,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
-    fontFamily: 'monospace', // Pixel art font
+  blurredSection: {
+    position: 'absolute',
+    width: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 6, // Above all image layers and black line, contains health bars
+    overflow: 'hidden',
   },
-  subtitle: {
-    ...typography.subtitle,
-    color: colors.textSecondary,
-    fontFamily: 'monospace', // Pixel art font
-  },
-  cameraButton: {
-    width: spacing.xxl + spacing.md,
-    height: spacing.xxl + spacing.md,
-    borderRadius: 0, // Sharp corners for pixel art
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3, // Thicker border
-    // Pixel art 3D button effect
-    borderTopColor: colors.pixelHighlight,
-    borderLeftColor: colors.pixelHighlight,
-    borderBottomColor: colors.pixelBorderDark,
-    borderRightColor: colors.pixelBorderDark,
-  },
-  statusContainer: {
-    marginBottom: spacing.xl,
-    alignItems: 'flex-start',
-  },
-  avatarContainer: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-    paddingVertical: spacing.lg,
-  },
-  levelText: {
-    ...typography.label,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
-    fontFamily: 'monospace', // Pixel art font
+  blurLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
   },
   healthBarsContainer: {
-    marginBottom: spacing.xl,
-    // No background, no border - health bars have their own styling
-  },
-  reminderContainer: {
-    marginBottom: spacing.xl,
-  },
-  eventLogContainer: {
-    marginTop: spacing.md,
-  },
-  sectionTitle: {
-    ...typography.subtitle,
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-    fontFamily: 'monospace', // Pixel art font
+    position: 'relative',
+    zIndex: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    justifyContent: 'flex-start',
   },
 });
