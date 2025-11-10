@@ -224,7 +224,7 @@ export default function DashboardScreen() {
         return "Whoa, the wind is tossing me!";
       }
       if (currentAnimation === WATERING_ANIMATION) {
-        return 'Ahhh, that cool drink hits!';
+        return null; // No speech bubble during watering animation
       }
       return null;
     })();
