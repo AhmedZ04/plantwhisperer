@@ -257,8 +257,8 @@ export function isHumOptimal(hum: number): boolean {
 }
 
 export function isMq2Optimal(mq2: number): boolean {
-  // Optimal: < 150 (air_good)
-  return mq2 < 150;
+  // Optimal: < 200 (200+ considered bad air per latest spec)
+  return mq2 < 200;
 }
 
 /**
