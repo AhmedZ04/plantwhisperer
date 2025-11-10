@@ -145,7 +145,11 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
   ) => {
     const iconSize = 48;
     const isAir = sensorType === 'mq2';
-    const moduleSize = isAir ? Math.round(iconSize * 1.6) : iconSize; // Slightly larger for Air icon
+    const isHum = sensorType === 'hum';
+    const isSoil = sensorType === 'soil';
+    const isTemp = sensorType === 'temp';
+    const isImageSensor = isAir || isHum || isSoil || isTemp;
+    const moduleSize = isImageSensor ? Math.round(iconSize * 1.6) : iconSize; // Slightly larger for Image-based icons
     const iconColor = isOptimal ? '#4caf50' : '#f44336'; // Green if optimal, red if not
 
     return (
@@ -156,7 +160,7 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
       >
         {/* Diamond-shaped icon module */}
         <View style={[styles.sensorIconModule, { width: moduleSize, height: moduleSize }]}>
-          {!isAir && (
+          {!isImageSensor && (
             <>
               {/* Outer dark border */}
               <View
@@ -195,14 +199,26 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
           )}
           {/* Icon */}
           <View style={styles.sensorIconContainerInner}>
-            {isAir ? (
+            {isImageSensor ? (
               <Image
                 source={
-                  isOptimal
-                    ? require('../../assets/images/Green_Air.png')
-                    : require('../../assets/images/Red_Air.png')
+                  isAir
+                    ? (isOptimal
+                        ? require('../../assets/images/Green_Air.png')
+                        : require('../../assets/images/Red_Air.png'))
+                    : isHum
+                      ? (isOptimal
+                          ? require('../../assets/images/Green_Humidity.png')
+                          : require('../../assets/images/Red_Humidity.png'))
+                      : isSoil
+                        ? (isOptimal
+                            ? require('../../assets/images/Green_Soil.png')
+                            : require('../../assets/images/Red_Soil.png'))
+                        : (isOptimal
+                            ? require('../../assets/images/Green_Temp.png')
+                            : require('../../assets/images/Red_Temp.png'))
                 }
-                // Double-size image for Air, fill the module
+                // Fill the module for image-based sensors
                 style={{ width: moduleSize - 4, height: moduleSize - 4 }}
                 contentFit="contain"
                 transition={200}
