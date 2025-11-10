@@ -252,8 +252,8 @@ export function isTempOptimal(temp: number): boolean {
 }
 
 export function isHumOptimal(hum: number): boolean {
-  // Optimal range: 40-70%
-  return hum >= 40 && hum <= 70;
+  // Optimal range: 40-80% (hot/humid animation triggers above 80)
+  return hum >= 40 && hum <= 80;
 }
 
 export function isMq2Optimal(mq2: number): boolean {

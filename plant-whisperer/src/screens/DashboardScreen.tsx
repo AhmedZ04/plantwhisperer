@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, useWindowDimensions, Text, TouchableOpacity, Animated, ImageSourcePropType } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, Text, TouchableOpacity, Animated, ImageSourcePropType, Modal, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,9 @@ import { useRouter } from 'expo-router';
 // Lazy require to avoid type resolution issues during linting if package isn't installed yet
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const MaskedView = require('@react-native-masked-view/masked-view').default;
+// Lazy import to avoid type issues before dependency is installed
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AsyncStorage = require('@react-native-async-storage/async-storage').default;
 import { usePlantState } from '@/src/hooks/usePlantState';
 import { HealthBars } from '@/src/components/HealthBars';
 import { PixelCameraIcon } from '@/src/components/PixelCameraIcon';
@@ -16,6 +19,7 @@ import {
   isTempOptimal,
   isHumOptimal,
   isMq2Optimal,
+  computeBioSignalState,
 } from '@/src/services/plantModel';
 
 const COLD_ANIMATION = require('../../assets/images/cold.gif');
@@ -23,6 +27,11 @@ const PEAK_ANIMATION = require('../../assets/images/peak.gif');
 const AIR_BAD_ANIMATION = require('../../assets/images/air_bad.gif');
 const DIZZY_ANIMATION = require('../../assets/images/dizzy.gif');
 const DRY_ANIMATION = require('../../assets/images/dry.gif');
+const FULL_DEAD_ANIMATION = require('../../assets/images/full_dead.gif');
+const HOT_ANIMATION = require('../../assets/images/hot.gif');
+const THIRSTY_ANIMATION = require('../../assets/images/thirsty.gif');
+const WATERING_ANIMATION = require('../../assets/images/watering.gif');
+const WINDY_ANIMATION = require('../../assets/images/windy.gif');
 
 /**
  * DashboardScreen - Shows background image with blurred section below black line
@@ -34,7 +43,16 @@ export default function DashboardScreen() {
   const router = useRouter();
 
   // Sensor status helpers for animation selection
-  const { soilMoisture, temperature, humidity, mq2 } = rawVitals;
+  const { soilMoisture, temperature, humidity, mq2, bio } = rawVitals;
+  // Watering overlay control (limited runs + cooldown)
+  const [overrideAnimation, setOverrideAnimation] = useState<ImageSourcePropType | null>(null);
+  const [sensorDialogVisible, setSensorDialogVisible] = useState(false);
+  const wateringPlaysRef = useRef<number>(0);
+  const wateringCooldownUntilRef = useRef<number>(0);
+  const prevWateringActiveRef = useRef<boolean>(false);
+  const WATERING_PLAYS_KEY = 'watering_plays_count';
+  const WATERING_COOLDOWN_KEY = 'watering_cooldown_until';
+  const WATERING_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   const allSensorsOptimal = useMemo(() => {
     return (
@@ -45,7 +63,71 @@ export default function DashboardScreen() {
     );
   }, [soilMoisture, temperature, humidity, mq2]);
 
+  const allSensorsNonOptimal = useMemo(() => {
+    return (
+      !isSoilOptimal(soilMoisture) &&
+      !isTempOptimal(temperature) &&
+      !isHumOptimal(humidity) &&
+      !isMq2Optimal(mq2)
+    );
+  }, [soilMoisture, temperature, humidity, mq2]);
+
+  // Load watering counters on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        // Reset counters each app launch to simplify demo behavior
+        wateringPlaysRef.current = 0;
+        wateringCooldownUntilRef.current = 0;
+        await AsyncStorage.multiRemove([WATERING_PLAYS_KEY, WATERING_COOLDOWN_KEY]);
+      } catch {
+        // ignore storage errors
+      }
+    })();
+  }, []);
+
+  // Detect watering edge and show limited animation with cooldown
+  useEffect(() => {
+    const isWateringActive = rawVitals.raindrop < 300;
+    const prevActive = prevWateringActiveRef.current;
+    prevWateringActiveRef.current = isWateringActive;
+
+    const now = Date.now();
+    const inCooldown = now < wateringCooldownUntilRef.current;
+    if (isWateringActive && !prevActive && !inCooldown) {
+      if (wateringPlaysRef.current < 2) {
+        setOverrideAnimation(WATERING_ANIMATION);
+        wateringPlaysRef.current += 1;
+        AsyncStorage.setItem(WATERING_PLAYS_KEY, String(wateringPlaysRef.current)).catch(() => {});
+        // Auto dismiss after 5s so normal state animations resume
+        setTimeout(() => setOverrideAnimation(null), 5000);
+        if (wateringPlaysRef.current >= 2) {
+          const until = now + WATERING_COOLDOWN_MS;
+          wateringCooldownUntilRef.current = until;
+          AsyncStorage.setItem(WATERING_COOLDOWN_KEY, String(until)).catch(() => {});
+        }
+      }
+    }
+
+    // Reset plays when cooldown expires
+    if (!inCooldown && wateringPlaysRef.current >= 2) {
+      wateringPlaysRef.current = 0;
+      AsyncStorage.setItem(WATERING_PLAYS_KEY, '0').catch(() => {});
+    }
+  }, [rawVitals.raindrop]);
   const animationSource = useMemo(() => {
+    // Highest priority: explicit override (e.g., watering)
+    if (overrideAnimation) {
+      return overrideAnimation;
+    }
+    // Highest priority: all sensors failing
+    if (allSensorsNonOptimal) {
+      return FULL_DEAD_ANIMATION;
+    }
+    // Bio signal windy state (loops until back to baseline)
+    if (computeBioSignalState(bio) === 'wind_trigger') {
+      return WINDY_ANIMATION;
+    }
     // Highest priority: very bad air quality
     if (mq2 >= 350) {
       return DIZZY_ANIMATION;
@@ -54,9 +136,17 @@ export default function DashboardScreen() {
     if (mq2 >= 200) {
       return AIR_BAD_ANIMATION;
     }
+    // Hot or humid
+    if (temperature > 27 || humidity > 80) {
+      return HOT_ANIMATION;
+    }
     // Dry soil
     if (soilMoisture >= 900) {
       return DRY_ANIMATION;
+    }
+    // Thirsty soil
+    if (soilMoisture >= 700 && soilMoisture <= 899) {
+      return THIRSTY_ANIMATION;
     }
     if (temperature < 13) {
       return COLD_ANIMATION;
@@ -65,7 +155,7 @@ export default function DashboardScreen() {
       return PEAK_ANIMATION;
     }
     return null;
-  }, [temperature, allSensorsOptimal, mq2, soilMoisture]);
+  }, [overrideAnimation, temperature, humidity, allSensorsOptimal, allSensorsNonOptimal, mq2, soilMoisture, bio]);
 
   const [currentAnimation, setCurrentAnimation] = useState<ImageSourcePropType | null>(animationSource);
   const [incomingAnimation, setIncomingAnimation] = useState<ImageSourcePropType | null>(null);
@@ -80,19 +170,9 @@ export default function DashboardScreen() {
       return;
     }
 
-    if (!animationSource) {
-      if (currentAnimation) {
-        Animated.timing(currentOpacity, {
-          toValue: 0,
-          duration: 420,
-          useNativeDriver: true,
-        }).start(() => {
-          setCurrentAnimation(null);
-          currentOpacity.setValue(1);
-        });
-      }
-      return;
-    }
+    // If no specific animation is requested, keep showing the current one
+    // (prevents gaps when a condition deactivates but no other takes over immediately)
+    if (!animationSource) return;
 
     if (!currentAnimation) {
       setCurrentAnimation(animationSource);
@@ -168,6 +248,13 @@ export default function DashboardScreen() {
         >
           <PixelCameraIcon size={32} color="#FFFFFF" />
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.sensorDialogButton}
+          onPress={() => setSensorDialogVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.sensorDialogButtonText}>Sensors</Text>
+        </TouchableOpacity>
 
         {/* Background Image */}
         <Image
@@ -220,6 +307,34 @@ export default function DashboardScreen() {
             </Animated.View>
           </MaskedView>
         )}
+
+        <Modal
+          visible={sensorDialogVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSensorDialogVisible(false)}
+        >
+          <Pressable style={styles.sensorModalOverlay} onPress={() => setSensorDialogVisible(false)}>
+            <Pressable style={styles.sensorModalContent} onPress={() => {}}>
+              <Text style={styles.sensorModalTitle}>Live Sensor Values</Text>
+              <View style={styles.sensorModalDivider} />
+              <View style={styles.sensorModalList}>
+                <Text style={styles.sensorModalItem}>Soil Moisture: {rawVitals.soilMoisture}</Text>
+                <Text style={styles.sensorModalItem}>Temperature: {rawVitals.temperature}°C</Text>
+                <Text style={styles.sensorModalItem}>Humidity: {rawVitals.humidity}%</Text>
+                <Text style={styles.sensorModalItem}>Air Quality (MQ2): {rawVitals.mq2}</Text>
+                <Text style={styles.sensorModalItem}>Raindrop: {rawVitals.raindrop}</Text>
+                <Text style={styles.sensorModalItem}>Bio Signal: {rawVitals.bio}</Text>
+                <Text style={styles.sensorModalItem}>
+                  Timestamp: {rawVitals.timestamp.toLocaleTimeString()}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.sensorModalClose} onPress={() => setSensorDialogVisible(false)}>
+                <Text style={styles.sensorModalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* Black Line Separator */}
         <View
@@ -343,5 +458,74 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5, // Android shadow
+  },
+  sensorDialogButton: {
+    position: 'absolute',
+    top: spacing.md + 56,
+    right: spacing.md,
+    zIndex: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(34, 34, 34, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  sensorDialogButtonText: {
+    color: '#fff',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    letterSpacing: 0.5,
+  },
+  sensorModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  sensorModalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#222',
+    borderRadius: 20,
+    padding: spacing.lg,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  sensorModalList: {
+    marginTop: spacing.sm,
+  },
+  sensorModalTitle: {
+    fontFamily: 'monospace',
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  sensorModalDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginVertical: spacing.sm,
+  },
+  sensorModalItem: {
+    fontFamily: 'monospace',
+    color: '#f5f5f5',
+    fontSize: 14,
+    marginBottom: spacing.xs,
+  },
+  sensorModalClose: {
+    marginTop: spacing.md,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: 999,
+    backgroundColor: '#f44336',
+  },
+  sensorModalCloseText: {
+    color: '#fff',
+    fontFamily: 'monospace',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
