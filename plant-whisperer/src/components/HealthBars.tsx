@@ -7,7 +7,7 @@
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
-import { PlantScores, PlantVitalsRaw } from '../types/plant';
+import { PlantScores, PlantVitalsRaw, ComfortMetrics, CareTargets } from '../types/plant';
 import { colors, spacing, typography } from '../theme';
 import { PixelIcon } from './PixelIcon';
 import {
@@ -27,9 +27,12 @@ import { HealthBar } from './HealthBar';
 interface HealthBarsProps {
   scores: PlantScores | null;
   rawVitals: PlantVitalsRaw | null;
+  metrics?: ComfortMetrics | null;
+  careTargets?: CareTargets | null;
+  setRealtimeMode?: (enabled: boolean) => void;
 }
 
-export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
+export function HealthBars({ scores, rawVitals, metrics, careTargets, setRealtimeMode }: HealthBarsProps) {
   const { width: windowWidth } = useWindowDimensions();
   const [selectedSensor, setSelectedSensor] = useState<'soil' | 'temp' | 'hum' | 'mq2' | null>(null);
 
@@ -37,18 +40,28 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
     return null; // Don't render if scores or raw vitals not available
   }
 
-  // Calculate overall health (weighted average of soil, temp, hum, mq2)
-  const overallHealth = computeOverallHealth(
-    rawVitals.soilMoisture,
-    rawVitals.temperature,
-    rawVitals.humidity,
-    rawVitals.mq2
-  );
+  // Calculate main bar: prefer PCS from comfort metrics if available
+  const overallHealth = typeof metrics?.pcs === 'number'
+    ? Math.round(metrics.pcs * 100)
+    : computeOverallHealth(
+        rawVitals.soilMoisture,
+        rawVitals.temperature,
+        rawVitals.humidity,
+        rawVitals.mq2
+      );
 
-  // Check optimality for each sensor
-  const soilOptimal = isSoilOptimal(rawVitals.soilMoisture);
-  const tempOptimal = isTempOptimal(rawVitals.temperature);
-  const humOptimal = isHumOptimal(rawVitals.humidity);
+  // Check optimality for each sensor (prefer API-derived ranges when available)
+  const within = (v: number, min: number, max: number) => v >= min && v <= max;
+  const soilOptimal = careTargets && typeof metrics?.soilPercent === 'number'
+    ? within(metrics!.soilPercent, careTargets.min_soil_moist, careTargets.max_soil_moist)
+    : isSoilOptimal(rawVitals.soilMoisture);
+  const tempOptimal = careTargets
+    ? within(rawVitals.temperature, careTargets.min_temp, careTargets.max_temp)
+    : isTempOptimal(rawVitals.temperature);
+  const humOptimal = careTargets
+    ? within(rawVitals.humidity, careTargets.min_env_humid, careTargets.max_env_humid)
+    : isHumOptimal(rawVitals.humidity);
+  // Gas remains hardcoded (MQ2 < 150)
   const mq2Optimal = isMq2Optimal(rawVitals.mq2);
 
   // Calculate individual sensor scores for the detail dialog
@@ -58,10 +71,12 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
   const mq2Score = computeAirQualityScore(rawVitals.mq2);
 
   const handleLongPress = (sensorType: 'soil' | 'temp' | 'hum' | 'mq2') => {
+    setRealtimeMode?.(true);
     setSelectedSensor(sensorType);
   };
 
   const handleCloseDialog = () => {
+    setRealtimeMode?.(false);
     setSelectedSensor(null);
   };
 
@@ -124,7 +139,7 @@ export function HealthBars({ scores, rawVitals }: HealthBarsProps) {
 
     return (
       <View style={styles.overallHealthContainer}>
-        <Text style={styles.overallHealthLabel}>Overall Health</Text>
+        <Text style={styles.overallHealthLabel}>Plant Comfort Score</Text>
         <View style={styles.overallHealthBarWrapper}>
           {/* Health bar component - handles its own percentage display */}
           <HealthBar

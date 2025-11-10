@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import {
   PlantState,
@@ -17,6 +18,7 @@ import {
   PlantMood,
   PlantCurrentState,
 } from '../types/plant';
+import { ComfortMetrics, CareTargets } from '../types/plant';
 import { dataClient, ConnectionStatus } from '../services/dataClient';
 import {
   computeHydrationScore,
@@ -30,12 +32,30 @@ import {
   computePlantCurrentState,
 } from '../services/plantModel';
 import { SensorState } from '../types/plant';
+import { fetchCareFieldsForName } from '../services/perenual';
+
+// Perenual watering benchmark parser
+function parseBenchmarkDays(value: unknown, unit?: string | null): number | null {
+  let days: number | null = null;
+  const u = (unit || '').toString().toLowerCase();
+  if (typeof value === 'number' && !isNaN(value)) days = value;
+  else if (typeof value === 'string') {
+    const nums = value.match(/\d+(?:\.\d+)?/g)?.map((n) => parseFloat(n)) || [];
+    if (nums.length === 1) days = nums[0];
+    else if (nums.length >= 2) days = (nums[0] + nums[1]) / 2;
+  }
+  if (days == null) return null;
+  if (u.includes('week')) return days * 7;
+  return days; // assume days otherwise
+}
 
 interface UsePlantStateReturn {
   // State
   vitals: PlantVitals;
   rawVitals: PlantVitalsRaw; // Expose raw sensor values for HealthBars
   scores: PlantScores | null;
+  metrics?: ComfortMetrics | null;
+  careTargets: CareTargets | null;
   mood: PlantMood;
   emotion: EmotionState;
   currentState: PlantCurrentState | null;
@@ -43,6 +63,8 @@ interface UsePlantStateReturn {
   pendingReminder: Reminder | null;
   simulationMode: boolean;
   connectionStatus: ConnectionStatus;
+  // Allow UI to enable immediate updates during sensor inspection
+  setRealtimeMode?: (enabled: boolean) => void;
   
   // Actions
   setSimulationMode: (enabled: boolean) => void;
@@ -88,6 +110,7 @@ export function usePlantState(): UsePlantStateReturn {
   
   // Computed state
   const [scores, setScores] = useState<PlantScores | null>(DEFAULT_SCORES);
+  const [metrics, setMetrics] = useState<ComfortMetrics | null>(null);
   const [mood, setMood] = useState<PlantMood>('ok');
   const [emotion, setEmotion] = useState<EmotionState>('I_AM_OKAY');
   const [currentState, setCurrentState] = useState<PlantCurrentState | null>(null);
@@ -98,10 +121,20 @@ export function usePlantState(): UsePlantStateReturn {
   const [pendingReminder, setPendingReminder] = useState<Reminder | null>(null);
   const [simulationMode, setSimulationModeState] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
+  const [careTargets, setCareTargets] = useState<CareTargets | null>(null);
   
   // Refs to track previous values for change detection
   const prevEmotionRef = useRef<EmotionState>('I_AM_OKAY');
   const prevScoresRef = useRef<PlantScores | null>(null);
+  const prevMetricsRef = useRef<ComfortMetrics | null>(null);
+  const realtimeOverrideRef = useRef<boolean>(false);
+  // Watering/Gas indices state
+  const lastWateredAtRef = useRef<number | null>(null);
+  const wetStreakRef = useRef<number>(0);
+  const [benchmarkDays, setBenchmarkDays] = useState<number>(8.5);
+  const giRef = useRef<number>(1.0); // 0..1
+  const mq2WindowRef = useRef<number[]>([]);
+  const highZHitsRef = useRef<number>(0);
   
   // Compute scores from raw vitals (defined first so it can be used in initialization)
   const computeScores = useCallback((raw: PlantVitalsRaw): PlantScores => {
@@ -118,21 +151,95 @@ export function usePlantState(): UsePlantStateReturn {
     };
   }, []);
 
+  // Care target defaults (used if we don't have API-provided benchmarks yet)
+  const CARE_DEFAULTS: CareTargets = {
+    max_temp: 32,
+    min_temp: 10,
+    max_env_humid: 85,
+    min_env_humid: 30,
+    max_soil_moist: 60,
+    min_soil_moist: 15,
+  };
+
+  // Attempt to hydrate care targets from Plantbook cache (if user identified a plant earlier)
+  useEffect(() => {
+    const PB_CACHE_PREFIX = 'pb:v1:';
+    const normalize = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+    (async () => {
+      try {
+        const key = PB_CACHE_PREFIX + normalize('Philodendron Birkin'); // default species for this build
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const pb = JSON.parse(raw) as Partial<CareTargets> & { [k: string]: any };
+          const next: CareTargets = {
+            max_temp: pb.max_temp ?? CARE_DEFAULTS.max_temp,
+            min_temp: pb.min_temp ?? CARE_DEFAULTS.min_temp,
+            max_env_humid: pb.max_env_humid ?? CARE_DEFAULTS.max_env_humid,
+            min_env_humid: pb.min_env_humid ?? CARE_DEFAULTS.min_env_humid,
+            max_soil_moist: pb.max_soil_moist ?? CARE_DEFAULTS.max_soil_moist,
+            min_soil_moist: pb.min_soil_moist ?? CARE_DEFAULTS.min_soil_moist,
+          };
+          setCareTargets(next);
+        }
+      } catch {
+        // ignore cache errors; keep defaults
+      }
+    })();
+  }, []);
+
+  // Calibrations and smoothing for real-time signals
+  const SOIL_CAL_DRY = 850; // ADC when very dry
+  const SOIL_CAL_WET = 400; // ADC when fully wet
+  const ALPHA = 0.2;        // EMA smoothing
+  const DELTA_INDEX = 0.03; // 3% change threshold for indices
+  const DELTA_SOILPCT = 2;  // 2 percentage points for soil %
+
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  const mapRange = (value: number, inMin: number, inMax: number, outMin: number, outMax: number) => {
+    if (inMax === inMin) return outMin;
+    const t = (value - inMin) / (inMax - inMin);
+    return outMin + t * (outMax - outMin);
+  };
+
+  const computeComfortMetrics = useCallback((raw: PlantVitalsRaw, care: CareTargets = CARE_DEFAULTS): ComfortMetrics => {
+    // Soil % from ADC using calibration
+    const soilPercent = clamp(mapRange(raw.soilMoisture, SOIL_CAL_DRY, SOIL_CAL_WET, 0, 100), 0, 100);
+    const moistureIndex = clamp((soilPercent - care.min_soil_moist) / (care.max_soil_moist - care.min_soil_moist), 0, 1);
+
+    // Temperature comfort index
+    const tOpt = (care.max_temp + care.min_temp) / 2;
+    const tHalf = (care.max_temp - care.min_temp) / 2 || 1;
+    const tempComfortIndex = clamp(1 - Math.abs(raw.temperature - tOpt) / tHalf, 0, 1);
+
+    // Humidity comfort index
+    const hOpt = (care.max_env_humid + care.min_env_humid) / 2;
+    const hHalf = (care.max_env_humid - care.min_env_humid) / 2 || 1;
+    const humidityComfortIndex = clamp(1 - Math.abs(raw.humidity - hOpt) / hHalf, 0, 1);
+
+    // PCS is computed later with Wi/Gi modifiers; initialize as base for now
+    const pcs = clamp(0.4 * moistureIndex + 0.3 * tempComfortIndex + 0.3 * humidityComfortIndex, 0, 1);
+
+    return { moistureIndex, tempComfortIndex, humidityComfortIndex, pcs, soilPercent };
+  }, []);
+
   // Initialize MQ-2 baseline and compute initial state
   useEffect(() => {
     setMq2Baseline(70); // Baseline is 70 per guidelines (normal reading ~70)
     // Compute initial state from default vitals
     const initialScores = computeScores(DEFAULT_RAW_VITALS);
+    const initialMetrics = computeComfortMetrics(DEFAULT_RAW_VITALS, careTargets ?? CARE_DEFAULTS);
     const initialMood = deriveMood(initialScores);
     const initialEmotion = deriveEmotionState(initialScores, DEFAULT_RAW_VITALS);
     const initialState = computePlantCurrentState(DEFAULT_RAW_VITALS);
     
     setScores(initialScores);
+    setMetrics(initialMetrics);
     setMood(initialMood);
     setEmotion(initialEmotion);
     setCurrentState(initialState);
     prevEmotionRef.current = initialEmotion;
     prevScoresRef.current = initialScores;
+    prevMetricsRef.current = initialMetrics;
     
     // Set initial vitals for display
     setVitals({
@@ -141,11 +248,109 @@ export function usePlantState(): UsePlantStateReturn {
       sunlight: initialScores.comfortScore,
       soil: initialScores.hydrationScore,
     });
-  }, [computeScores]);
+  }, [computeScores, computeComfortMetrics, careTargets]);
+
+  // Load persisted watering info and set benchmark from Perenual if available
+  useEffect(() => {
+    (async () => {
+      try {
+        const norm = 'philodendron birkin';
+        const lastKey = `watering:last:${norm}`;
+        const benchKey = `watering:benchDays:${norm}`;
+        const [lastRaw, benchRaw] = await Promise.all([
+          AsyncStorage.getItem(lastKey),
+          AsyncStorage.getItem(benchKey),
+        ]);
+        if (lastRaw) {
+          const t = parseInt(lastRaw, 10);
+          if (!isNaN(t)) lastWateredAtRef.current = t;
+        }
+        if (benchRaw) {
+          const d = parseFloat(benchRaw);
+          if (!isNaN(d) && d > 0.1) setBenchmarkDays(d);
+        }
+        // Try fetch from Perenual for default species
+        try {
+          const care = await fetchCareFieldsForName('Philodendron Birkin', 'Philodendron');
+          const v = care?.watering_general_benchmark?.value;
+          const u = care?.watering_general_benchmark?.unit;
+          const d = parseBenchmarkDays(v ?? null, u ?? null);
+          if (d && d > 0.1) {
+            setBenchmarkDays(d);
+            await AsyncStorage.setItem(benchKey, String(d));
+          }
+        } catch {}
+        if (!lastWateredAtRef.current) {
+          const now = Date.now();
+          lastWateredAtRef.current = now;
+          await AsyncStorage.setItem(lastKey, String(now));
+        }
+      } catch {}
+    })();
+  }, []);
 
   // Update computed state from raw vitals
   const updateStateFromRawVitals = useCallback((raw: PlantVitalsRaw) => {
     const newScores = computeScores(raw);
+    const newMetrics = computeComfortMetrics(raw, careTargets ?? CARE_DEFAULTS);
+    // --- Watering index Wi (0..1) with decay and soil gating
+    const nowMs = Date.now();
+    const RAINDROP_PARTIAL_THRESHOLD = 400; // partial contact 250-400, fully wet <150
+    const REQUIRED_WET_STREAK = 3; // samples
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    if (raw.raindrop < RAINDROP_PARTIAL_THRESHOLD) {
+      wetStreakRef.current += 1;
+    } else {
+      wetStreakRef.current = 0;
+    }
+    if (wetStreakRef.current >= REQUIRED_WET_STREAK) {
+      lastWateredAtRef.current = nowMs;
+      wetStreakRef.current = 0;
+      // Persist last watered timestamp for default species
+      (async () => {
+        try {
+          const norm = 'philodendron birkin';
+          await AsyncStorage.setItem(`watering:last:${norm}`, String(nowMs));
+        } catch {}
+      })();
+    }
+    let wi = 0;
+    if (lastWateredAtRef.current) {
+      const tDays = (nowMs - lastWateredAtRef.current) / MS_PER_DAY;
+      const wiRaw = Math.max(0, 1 - tDays / Math.max(0.1, benchmarkDays));
+      wi = Math.min(wiRaw, newMetrics.moistureIndex); // soil gating (Mi in 0..1)
+    }
+
+    // --- Gas quality index Gi (0..1) spike detection + slow recovery
+    const Z_TRIG = 3.0;
+    const WINDOW = 60; // samples
+    const REQUIRED_SPIKE_HITS = 3;
+    const RECENT_WINDOW = 5;
+    const RECOVERY_ALPHA = 0.01; // per update
+
+    const w = mq2WindowRef.current;
+    w.push(raw.mq2);
+    if (w.length > WINDOW) w.shift();
+    const mean = w.reduce((a, b) => a + b, 0) / Math.max(1, w.length);
+    const variance = w.reduce((a, b) => a + (b - mean) * (b - mean), 0) / Math.max(1, w.length - 1);
+    const std = Math.sqrt(Math.max(variance, 1e-6));
+    const z = (raw.mq2 - mean) / std;
+    if (z >= Z_TRIG) highZHitsRef.current += 1; else if (highZHitsRef.current > 0) highZHitsRef.current -= 1;
+    highZHitsRef.current = Math.min(highZHitsRef.current, RECENT_WINDOW);
+    if (highZHitsRef.current >= REQUIRED_SPIKE_HITS) {
+      giRef.current = Math.min(giRef.current, 0.2);
+      highZHitsRef.current = 0;
+    } else {
+      giRef.current = Math.min(1, giRef.current + (1 - giRef.current) * RECOVERY_ALPHA);
+    }
+    const gi = giRef.current;
+
+    // --- Multiplicative PCS with Wi/Gi modifiers
+    const comfortBase = 0.5 * newMetrics.moistureIndex + 0.25 * newMetrics.tempComfortIndex + 0.25 * newMetrics.humidityComfortIndex;
+    const waterFactor = 0.90 + 0.10 * Math.min(wi, newMetrics.moistureIndex);
+    const gasFactor = 0.70 + 0.30 * gi;
+    const pcsMul = clamp(comfortBase * waterFactor * gasFactor, 0, 1);
+    newMetrics.pcs = pcsMul;
     const newMood = deriveMood(newScores);
     const newEmotion = deriveEmotionState(newScores, raw);
     const newCurrentState = computePlantCurrentState(raw);
@@ -196,8 +401,36 @@ export function usePlantState(): UsePlantStateReturn {
       setPendingReminder(null);
     }
 
+    // Smooth + threshold update for metrics to avoid noisy UI changes
+    const prevM = prevMetricsRef.current;
+    if (!prevM) {
+      setMetrics(newMetrics);
+      prevMetricsRef.current = newMetrics;
+    } else {
+      const smooth: ComfortMetrics = {
+        moistureIndex: prevM.moistureIndex * (1 - ALPHA) + newMetrics.moistureIndex * ALPHA,
+        tempComfortIndex: prevM.tempComfortIndex * (1 - ALPHA) + newMetrics.tempComfortIndex * ALPHA,
+        humidityComfortIndex: prevM.humidityComfortIndex * (1 - ALPHA) + newMetrics.humidityComfortIndex * ALPHA,
+        pcs: prevM.pcs * (1 - ALPHA) + newMetrics.pcs * ALPHA,
+        soilPercent: prevM.soilPercent * (1 - ALPHA) + newMetrics.soilPercent * ALPHA,
+      };
+
+      const major = (
+        Math.abs(smooth.moistureIndex - prevM.moistureIndex) > DELTA_INDEX ||
+        Math.abs(smooth.tempComfortIndex - prevM.tempComfortIndex) > DELTA_INDEX ||
+        Math.abs(smooth.humidityComfortIndex - prevM.humidityComfortIndex) > DELTA_INDEX ||
+        Math.abs(smooth.pcs - prevM.pcs) > DELTA_INDEX ||
+        Math.abs(smooth.soilPercent - prevM.soilPercent) > DELTA_SOILPCT
+      );
+
+      if (major || realtimeOverrideRef.current) {
+        setMetrics(smooth);
+        prevMetricsRef.current = smooth;
+      }
+    }
+
     prevScoresRef.current = newScores;
-  }, [computeScores]);
+  }, [computeScores, computeComfortMetrics, careTargets]);
 
   // Handle sensor data from WebSocket - use ref to avoid dependency issues
   const handleSensorUpdateRef = useRef<((sensorState: SensorState) => void) | undefined>(undefined);
@@ -329,6 +562,8 @@ export function usePlantState(): UsePlantStateReturn {
     vitals,
     rawVitals, // Expose raw sensor values
     scores,
+    metrics,
+    careTargets,
     mood,
     emotion,
     currentState,
@@ -336,6 +571,7 @@ export function usePlantState(): UsePlantStateReturn {
     pendingReminder,
     simulationMode,
     connectionStatus,
+    setRealtimeMode: (enabled: boolean) => { realtimeOverrideRef.current = !!enabled; },
     setSimulationMode,
     setSimulatedVitals,
     id: 'plant-1',

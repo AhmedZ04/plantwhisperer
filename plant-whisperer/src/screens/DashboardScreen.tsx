@@ -3,7 +3,6 @@ import { View, StyleSheet, useWindowDimensions, Text, TouchableOpacity } from 'r
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { usePlantState } from '@/src/hooks/usePlantState';
 import { HealthBars } from '@/src/components/HealthBars';
 import { useRouter } from 'expo-router';
@@ -16,8 +15,7 @@ import { spacing, colors, typography } from '@/src/theme';
  */
 export default function DashboardScreen() {
 
-  const router = useRouter();
-  const { scores, emotion, rawVitals } = usePlantState();
+  const { scores, emotion, rawVitals, metrics, careTargets, setRealtimeMode } = usePlantState();
 
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
@@ -110,7 +108,7 @@ export default function DashboardScreen() {
           {/* Health Bars on top of blurred area */}
           {scores && (
             <View style={styles.healthBarsContainer}>
-              <HealthBars scores={scores} rawVitals={rawVitals} />
+              <HealthBars scores={scores} rawVitals={rawVitals} metrics={metrics} careTargets={careTargets} setRealtimeMode={setRealtimeMode} />
             </View>
           )}
         </View>

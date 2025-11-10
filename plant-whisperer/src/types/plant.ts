@@ -76,6 +76,25 @@ export interface PlantScores {
   bioSignalScore: number;
 }
 
+// Numeric care targets for computing comfort indices (usually from Plantbook)
+export interface CareTargets {
+  max_temp: number;        // °C
+  min_temp: number;        // °C
+  max_env_humid: number;   // % RH
+  min_env_humid: number;   // % RH
+  max_soil_moist: number;  // % of field capacity
+  min_soil_moist: number;  // % of field capacity
+}
+
+// Derived indices based on care targets
+export interface ComfortMetrics {
+  moistureIndex: number;       // 0–1
+  tempComfortIndex: number;    // 0–1
+  humidityComfortIndex: number;// 0–1
+  pcs: number;                 // 0–1 => overall Plant Comfort Score
+  soilPercent: number;         // mapped soil % from raw sensor (0–100)
+}
+
 export interface PlantEvent {
   id: string;
   type: 'watered' | 'checked' | 'level-up' | 'warning' | 'error';
