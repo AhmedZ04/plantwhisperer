@@ -104,6 +104,8 @@ export default function ResultScreen() {
               <Text style={styles.h2}>Care Targets</Text>
               <Text style={styles.jsonBlock}>{JSON.stringify({
                 watering: care?.watering ?? null,
+                watering_general_benchmark_value: care?.watering_general_benchmark?.value ?? null,
+                watering_general_benchmark_unit: care?.watering_general_benchmark?.unit ?? null,
                 growth_rate: care?.growth_rate ?? null,
                 max_temp: pb?.max_temp ?? null,
                 min_temp: pb?.min_temp ?? null,
