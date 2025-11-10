@@ -191,7 +191,7 @@ export function usePlantState(): UsePlantStateReturn {
   }, [computeScores]);
 
   // Handle sensor data from WebSocket - use ref to avoid dependency issues
-  const handleSensorUpdateRef = useRef<(sensorState: SensorState) => void>();
+  const handleSensorUpdateRef = useRef<((sensorState: SensorState) => void) | undefined>(undefined);
 
   // Update the ref when updateStateFromRawVitals changes
   useEffect(() => {
