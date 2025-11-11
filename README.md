@@ -55,11 +55,15 @@ Through bioelectrical signals and live environmental readings, your plant expres
 | ![Perfect](./Animations/Final/Day/okay_animation_day.gif) | ![Thirsty](./Animations/Final/Day/thirsty_animation_day.gif) | ![Bad Air Quality](./Animations/Final/Day/dizzy_animation_day.gif) |
 | *Healthy and happy plant in stable conditions* | *Soil moisture too low — needs water!* | *Poor air or gas conditions causing stress* |
 
-| 🌙 **Night Mode** | 😵 **Dizzy Mode** | 💤 **Dead Mode** |
+| 🌙 **Cold Temperature** | 😵 **Dizzy Mode** | 💤 **Dead Mode** |
 |-------------------|------------------|----------------|
-| ![Night Okay](./Animations/Themes/Night/stable_animation.gif) | ![Dizzy](./Animations/Final/Night/dizzy_animation.gif) | ![Rest](./Animations/Final/Day/full_dead_animation_day.gif) |
+| ![Cold](./Animations/Final/Night/cold_animation.gif) | ![Dizzy](./Animations/Final/Night/dizzy_animation.gif) | ![Rest](./Animations/Final/Day/full_dead_animation_day.gif) |
 | *Relaxed under night lighting* | *Poor air or gas conditions causing stress* | *Plant in worst conditions* |
 
+| 🌙 **Night Mode** | 😵 **Day Mode** |
+|-------------------|------------------|----------------|
+| ![Night Okay](./Animations/Themes/Night/stable_animation.gif) | ![Dizzy](./Animations/Final/Day/hot_animation_day.gif) |
+| *Relaxed under night lighting* | *Hot under the Day lighting* |
 
 ---
 
