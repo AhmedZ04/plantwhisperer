@@ -1,7 +1,7 @@
 # 🌿 Plantagotchi – Interactive Illustrated Plant Care App
 
 <div align="center">
-  <img src="Animations/Icons/Green_Soil.png" alt="Plant Whisperer Logo" width="100" height="100">
+  <img src="Animations/Logo.png" alt="Plant Whisperer Logo" width="100" height="100">
 
   **A hand-drawn digital companion that lets plants “speak” through real-time sensor emotions.**
   
