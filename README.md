@@ -61,18 +61,10 @@ Through bioelectrical signals and live environmental readings, your plant expres
 | *Relaxed under night lighting* | *Poor air or gas conditions causing stress* | *Plant in worst conditions* |
 
 ---
-## 🎥 Screenshots & Demo
-
-| Live App View | Description |
-|----------------|-------------|
-| <img src="https://github.com/yourusername/yourrepo/assets/demo_screenshot.png" width="250"> | *Real-time mood display — the plant reacts instantly to changes in its environment.* |
+## 🎥 Demo
 
 <div align="center">
-  <a href="https://youtube.com/shorts/_Rtnkhy3jHY?si=Nw0nGcZnq8E2Oxly">
-    <img src="https://img.youtube.com/vi/_Rtnkhy3jHY/hqdefault.jpg" width="480" alt="Plantagotchi Demo">
-  </a>
-  <br>
-  ▶️ **Watch the live demo:** [Plantagotchi in action](https://youtube.com/shorts/_Rtnkhy3jHY?si=Nw0nGcZnq8E2Oxly)
+  🎥 **[Plantagotchi Live Demo](https://youtube.com/shorts/_Rtnkhy3jHY?si=Nw0nGcZnq8E2Oxly)**
 </div>
 ---
 
