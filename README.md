@@ -60,11 +60,20 @@ Through bioelectrical signals and live environmental readings, your plant expres
 | ![Cold](./Animations/Final/Night/cold_animation.gif) | ![Dizzy](./Animations/Final/Night/dizzy_animation.gif) | ![Rest](./Animations/Final/Day/full_dead_animation_day.gif) |
 | *Relaxed under night lighting* | *Poor air or gas conditions causing stress* | *Plant in worst conditions* |
 
-| 🌙 **Night Mode** | 😵 **Day Mode** |
-|-------------------|------------------|----------------|
-| ![Night Okay](./Animations/Themes/Night/stable_animation.gif) | ![Dizzy](./Animations/Final/Day/hot_animation_day.gif) |
-| *Relaxed under night lighting* | *Hot under the Day lighting* |
+---
+## 🎥 Screenshots & Demo
 
+| Live App View | Description |
+|----------------|-------------|
+| <img src="https://github.com/yourusername/yourrepo/assets/demo_screenshot.png" width="250"> | *Real-time mood display — the plant reacts instantly to changes in its environment.* |
+
+<div align="center">
+  <a href="https://youtube.com/shorts/_Rtnkhy3jHY?si=Nw0nGcZnq8E2Oxly">
+    <img src="https://img.youtube.com/vi/_Rtnkhy3jHY/hqdefault.jpg" width="480" alt="Plantagotchi Demo">
+  </a>
+  <br>
+  ▶️ **Watch the live demo:** [Plantagotchi in action](https://youtube.com/shorts/_Rtnkhy3jHY?si=Nw0nGcZnq8E2Oxly)
+</div>
 ---
 
 ## 🚀 Quick Start
